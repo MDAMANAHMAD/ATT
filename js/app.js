@@ -1,6 +1,6 @@
 /**
  * app.js - TypeCraft Secure Stream Coordinator
- * Implements the passcode keypad lock screen validation (9505) and secure SSE streaming.
+ * Implements strict back-button passcode gating (9505) and secure SSE streaming.
  */
 
 import { db } from './db.js';
@@ -30,6 +30,12 @@ let passcodeBuffer = "";
 let eventSource = null;
 let allSentences = [];
 
+// Determine API Base URL
+// If hosted on a cloud domain, connect to the cloud Render API, otherwise default to local port 5001
+const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? 'http://localhost:5001'
+  : 'https://att-render-api.onrender.com'; // Replace this URL with your actual hosted Render service URL
+
 // Initialize Application
 document.addEventListener('DOMContentLoaded', async () => {
   try {
@@ -39,15 +45,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     showToast('Failed to initialize local database.', 'error');
   }
 
-  // Check if session authentication token exists
-  const isAuthenticated = sessionStorage.getItem('typecraft_authenticated') === 'true';
-
-  if (isAuthenticated) {
-    unlockVisualizer();
-  } else {
-    // Setup keypad listeners
-    initKeypad();
-  }
+  // Setup keypad listeners
+  initKeypad();
 
   // Filter input listener
   searchInput.addEventListener('input', handleSearch);
@@ -58,6 +57,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (window.lucide) {
     window.lucide.createIcons();
   }
+});
+
+// STRICT BACK-BUTTON GATING:
+// Listen to pageshow and popstate events to force-lock the screen on history navigation.
+window.addEventListener('pageshow', (event) => {
+  console.log("Pageshow triggered. Locking visualizer.");
+  lockVisualizer();
+});
+
+window.addEventListener('popstate', (event) => {
+  console.log("Popstate triggered. Locking visualizer.");
+  lockVisualizer();
 });
 
 /**
@@ -71,9 +82,8 @@ function initKeypad() {
         passcodeBuffer += val;
         updatePasscodeDots();
         
-        // Check code if buffer length is 4
         if (passcodeBuffer.length === 4) {
-          // Delay briefly for visual confirmation of the 4th dot
+          // Verify passcode after a tiny delay for visual confirmation of the 4th dot
           setTimeout(verifyPasscode, 150);
         }
       }
@@ -100,23 +110,45 @@ function updatePasscodeDots() {
  */
 function verifyPasscode() {
   if (passcodeBuffer === CORRECT_PASSCODE) {
-    sessionStorage.setItem('typecraft_authenticated', 'true');
     unlockVisualizer();
   } else {
-    // Trigger vibration if mobile
     if (navigator.vibrate) {
       navigator.vibrate(100);
     }
     
-    // Add shake animation
+    // Trigger shake animation
     passcodeDots.classList.add('shake');
     
-    // Clear and reset dots after shake animation finishes (350ms)
     setTimeout(() => {
       passcodeBuffer = "";
       updatePasscodeDots();
       passcodeDots.classList.remove('shake');
     }, 350);
+  }
+}
+
+/**
+ * Force locks the interface
+ */
+function lockVisualizer() {
+  // Close active SSE connection
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
+
+  // Clear states
+  passcodeBuffer = "";
+  updatePasscodeDots();
+  allSentences = [];
+  renderHistoryFeed([]);
+  
+  // Update view visibility
+  viewStream.style.display = 'none';
+  viewLock.classList.add('active');
+  
+  if (window.lucide) {
+    window.lucide.createIcons();
   }
 }
 
@@ -127,7 +159,6 @@ function unlockVisualizer() {
   viewLock.classList.remove('active');
   viewStream.style.display = 'block';
   
-  // Reload icons inside header
   if (window.lucide) {
     window.lucide.createIcons();
   }
@@ -142,11 +173,10 @@ function unlockVisualizer() {
  */
 async function loadHistoryFeed() {
   try {
-    const response = await fetch(`http://localhost:5001/activity?passcode=${CORRECT_PASSCODE}`);
+    const response = await fetch(`${API_BASE_URL}/activity?passcode=${CORRECT_PASSCODE}`);
     
     if (response.status === 401) {
-      sessionStorage.removeItem('typecraft_authenticated');
-      window.location.reload();
+      lockVisualizer();
       return;
     }
     
@@ -175,7 +205,7 @@ function connectToSecureStream() {
     eventSource.close();
   }
 
-  eventSource = new EventSource(`http://localhost:5001/stream?passcode=${CORRECT_PASSCODE}`);
+  eventSource = new EventSource(`${API_BASE_URL}/stream?passcode=${CORRECT_PASSCODE}`);
 
   eventSource.onopen = () => {
     updateConnectionStatus(true);
@@ -307,7 +337,7 @@ function handleSearch() {
 async function clearHistory() {
   if (confirm('Are you sure you want to delete ALL typed history? This will permanently wipe your text logs.')) {
     try {
-      const response = await fetch(`http://localhost:5001/clear?passcode=${CORRECT_PASSCODE}`);
+      const response = await fetch(`${API_BASE_URL}/clear?passcode=${CORRECT_PASSCODE}`);
       const data = await response.json();
       
       if (data.status === 'cleared') {
