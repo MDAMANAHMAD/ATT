@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TypeCraft Stream — Authenticated Real-Time Feed</title>
+  <meta name="description" content="A secure, passcode-gated global typing stream that displays whatever you write on your device.">
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+  <div class="app-container">
+
+    <!-- ==========================================
+         SECURE PASSCODE SCREEN (Locked by default)
+         ========================================== -->
+    <main class="lock-screen-container active" id="view-lock">
+      <div class="lock-card">
+        <!-- Padlock circle icon -->
+        <div class="lock-icon-circle">
+          <i data-lucide="lock"></i>
+        </div>
+        
+        <h2>Enter Passcode</h2>
+        <p class="lock-subtitle">Your Document Hub is locked</p>
+        
+        <!-- 4 dots status indicators -->
+        <div class="lock-dots" id="passcode-dots">
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+        </div>
+        
+        <!-- Keypad grid layout -->
+        <div class="keypad-grid">
+          <button class="keypad-btn" data-val="1">1</button>
+          <button class="keypad-btn" data-val="2">2</button>
+          <button class="keypad-btn" data-val="3">3</button>
+          
+          <button class="keypad-btn" data-val="4">4</button>
+          <button class="keypad-btn" data-val="5">5</button>
+          <button class="keypad-btn" data-val="6">6</button>
+          
+          <button class="keypad-btn" data-val="7">7</button>
+          <button class="keypad-btn" data-val="8">8</button>
+          <button class="keypad-btn" data-val="9">9</button>
+          
+          <div class="keypad-empty"></div>
+          <button class="keypad-btn" data-val="0">0</button>
+          <button class="keypad-btn text-btn" id="btn-delete-passcode">Delete</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- ==========================================
+         AUTHENTICATED TYPING STREAM VIEW (Hidden by default)
+         ========================================== -->
+    <div class="stream-content-wrapper" id="view-stream" style="display: none;">
+      <!-- Clean Minimalist Header -->
+      <header>
+        <div class="logo-section">
+          <div class="logo-icon">TC</div>
+          <div class="logo-text">
+            <h1>TypeCraft</h1>
+            <span>Stream</span>
+          </div>
+        </div>
+
+        <!-- Connection Status -->
+        <div class="status-badge disconnected" id="status-badge">
+          <span class="status-dot"></span>
+          <span id="status-text">Disconnected</span>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls-bar">
+          <div class="search-box">
+            <i data-lucide="search" class="search-icon"></i>
+            <input type="text" id="search-input" placeholder="Search typed text..." autocomplete="off">
+          </div>
+          <button class="icon-btn" id="btn-clear" title="Clear Stream" style="border-color: rgba(255, 78, 80, 0.25);">
+            <i data-lucide="trash-2" style="color: var(--color-error);"></i>
+          </button>
+        </div>
+      </header>
+
+      <!-- Visualizer Stream -->
+      <main class="visualizer-main">
+        <!-- Live Input Feed -->
+        <section class="live-section">
+          <div class="live-card">
+            <div class="live-card-header">
+              <span><i data-lucide="activity" class="header-icon"></i> Live Input Feed</span>
+            </div>
+            <div class="live-text-container">
+              <span id="live-text" class="placeholder-text">Type anything on your device... (Notepad, browser, code editor, etc.)</span>
+              <span class="live-cursor">|</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Continuous Typing History -->
+        <section class="history-section">
+          <div class="section-title">
+            <i data-lucide="clock"></i>
+            <h2>Continuous Typing Stream</h2>
+          </div>
+          <div class="history-stream" id="history-container">
+            <div class="empty-state">
+              <i data-lucide="inbox"></i>
+              <p>Your typing history is empty. Start the background listener and type something on your device!</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Global Toast Alert -->
+    <div class="toast" id="toast-notification">
+      <i data-lucide="check-circle" id="toast-icon"></i>
+      <span id="toast-message">Success! Database saved.</span>
+    </div>
+  </div>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Main Application Entrypoint -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
