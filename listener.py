@@ -1,4 +1,5 @@
 import sys
+import os
 import time
 import json
 import queue
@@ -15,23 +16,39 @@ ACTIVITY_FILE = 'activity.json'
 IDLE_TIMEOUT = 2.0 # Wait 2 seconds before committing a sentence
 PASSCODE = "9505"
 
-# MongoDB Configuration
-MONGO_URI = "mongodb+srv://amanahmad0406_db_user:i7w66LVt7JXGP86x@cluster0.z2bsgc5.mongodb.net/?appName=Cluster0"
+# MongoDB Configuration - Read from environment variable for security
+if os.path.exists('.env'):
+    try:
+        with open('.env', 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ[key.strip()] = value.strip().strip('"').strip("'")
+    except Exception as e:
+        print(f"Error reading local .env file: {e}")
+
+MONGO_URI = os.environ.get("MONGO_URI")
 mongo_connected = False
 db_history_col = None
 
-# Initialize MongoDB connection
-try:
-    print("Connecting to MongoDB Atlas...")
-    mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-    mongo_client.admin.command('ping')
-    db = mongo_client['TypeCraft']
-    db_history_col = db['stream_history']
-    mongo_connected = True
-    print("Successfully connected to MongoDB Atlas!")
-except Exception as e:
-    print(f"MongoDB connection failed: {e}. Falling back to local storage.")
+
+if MONGO_URI:
+    try:
+        print("Connecting to MongoDB Atlas...")
+        mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+        mongo_client.admin.command('ping')
+        db = mongo_client['TypeCraft']
+        db_history_col = db['stream_history']
+        mongo_connected = True
+        print("Successfully connected to MongoDB Atlas!")
+    except Exception as e:
+        print(f"MongoDB connection failed: {e}. Falling back to local storage.")
+        mongo_connected = False
+else:
+    print("MONGO_URI environment variable not found. Running in local-only mode.")
     mongo_connected = False
+
 
 # Background DB Queue Worker
 db_queue = queue.Queue()
