@@ -1,6 +1,7 @@
 /**
  * app.js - TypeCraft Secure Stream Coordinator
- * Implements strict back-button passcode gating (9505) and secure SSE streaming.
+ * Implements strict back-button passcode gating (9505), secure SSE streaming,
+ * and auto-discovery of local/cloud API endpoints.
  */
 
 import { db } from './db.js';
@@ -30,16 +31,16 @@ let passcodeBuffer = "";
 let eventSource = null;
 let allSentences = [];
 
-// Determine API Base URL
-const API_BASE_URL = 'https://att-render-api.onrender.com';
-
+// Determine API Base URL (Default to local, will auto-discover)
+let API_BASE_URL = 'http://localhost:5001';
+const CLOUD_API_URL = 'https://att-render-api.onrender.com';
 
 // Initialize Application
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     await db.open();
   } catch (e) {
-    console.error('IndexedDB load failed:', e);
+    console.error('Failed to initialize local database:', e);
     showToast('Failed to initialize local database.', 'error');
   }
 
@@ -153,7 +154,7 @@ function lockVisualizer() {
 /**
  * Transition from Lock Screen to Visualizer stream view
  */
-function unlockVisualizer() {
+async function unlockVisualizer() {
   viewLock.classList.remove('active');
   viewStream.style.display = 'block';
   
@@ -161,9 +162,41 @@ function unlockVisualizer() {
     window.lucide.createIcons();
   }
 
+  // Auto-discover the best API endpoint before fetching history
+  await discoverApiEndpoint();
+
   // Load database cache and start SSE live feed
   loadHistoryFeed();
   connectToSecureStream();
+}
+
+/**
+ * Auto-discovers whether to use local listener or cloud Render API
+ */
+async function discoverApiEndpoint() {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 1200); // 1.2 seconds timeout
+    
+    // Quick request to local python listener
+    const response = await fetch('http://localhost:5001/activity?passcode=' + CORRECT_PASSCODE, {
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (response.status === 200 || response.status === 401) {
+      API_BASE_URL = 'http://localhost:5001';
+      console.log("Discovered local tracker active on http://localhost:5001");
+      return;
+    }
+  } catch (err) {
+    console.log("Local tracker not running on this machine. Falling back to cloud.");
+  }
+  
+  // Fallback to cloud Render URL
+  API_BASE_URL = CLOUD_API_URL;
+  console.log("Using Cloud API Endpoint:", API_BASE_URL);
 }
 
 /**
