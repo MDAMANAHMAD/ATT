@@ -1,19 +1,12 @@
 /**
- * app.js - TypeCraft Secure Stream Coordinator
- * Implements strict back-button passcode gating (9505), secure SSE streaming,
- * and auto-discovery of local/cloud API endpoints.
+ * app.js - TypeCraft Stream Coordinator
+ * Coordinates Server-Sent Events stream, IndexedDB updates, search filters, 
+ * and auto-discovery of local/cloud API endpoints. No passcode gating.
  */
 
 import { db } from './db.js';
 
-// DOM Elements - Lock Screen
-const viewLock = document.getElementById('view-lock');
-const passcodeDots = document.getElementById('passcode-dots');
-const btnDeletePasscode = document.getElementById('btn-delete-passcode');
-const keypadButtons = document.querySelectorAll('.keypad-btn[data-val]');
-
-// DOM Elements - Stream visualizer
-const viewStream = document.getElementById('view-stream');
+// DOM Elements
 const statusBadge = document.getElementById('status-badge');
 const statusText = document.getElementById('status-text');
 const liveText = document.getElementById('live-text');
@@ -26,8 +19,6 @@ const toastIcon = document.getElementById('toast-icon');
 const toastMessage = document.getElementById('toast-message');
 
 // State Variables
-const CORRECT_PASSCODE = "9505";
-let passcodeBuffer = "";
 let eventSource = null;
 let allSentences = [];
 
@@ -44,9 +35,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     showToast('Failed to initialize local database.', 'error');
   }
 
-  // Setup keypad listeners
-  initKeypad();
-
   // Filter input listener
   searchInput.addEventListener('input', handleSearch);
 
@@ -56,112 +44,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (window.lucide) {
     window.lucide.createIcons();
   }
-});
 
-// STRICT BACK-BUTTON GATING:
-// Listen to pageshow and popstate events to force-lock the screen on history navigation.
-window.addEventListener('pageshow', (event) => {
-  console.log("Pageshow triggered. Locking visualizer.");
-  lockVisualizer();
-});
-
-window.addEventListener('popstate', (event) => {
-  console.log("Popstate triggered. Locking visualizer.");
-  lockVisualizer();
+  // Initialize stream visualizer directly on load
+  initializeVisualizer();
 });
 
 /**
- * Keypad click operations
+ * Auto-discovers endpoints and launches connection
  */
-function initKeypad() {
-  keypadButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const val = btn.dataset.val;
-      if (passcodeBuffer.length < 4) {
-        passcodeBuffer += val;
-        updatePasscodeDots();
-        
-        if (passcodeBuffer.length === 4) {
-          // Verify passcode after a tiny delay for visual confirmation of the 4th dot
-          setTimeout(verifyPasscode, 150);
-        }
-      }
-    });
-  });
-
-  btnDeletePasscode.addEventListener('click', () => {
-    if (passcodeBuffer.length > 0) {
-      passcodeBuffer = passcodeBuffer.slice(0, -1);
-      updatePasscodeDots();
-    }
-  });
-}
-
-function updatePasscodeDots() {
-  const dots = passcodeDots.querySelectorAll('.dot');
-  dots.forEach((dot, index) => {
-    dot.classList.toggle('filled', index < passcodeBuffer.length);
-  });
-}
-
-/**
- * Verifies entered passcode against 9505
- */
-function verifyPasscode() {
-  if (passcodeBuffer === CORRECT_PASSCODE) {
-    unlockVisualizer();
-  } else {
-    if (navigator.vibrate) {
-      navigator.vibrate(100);
-    }
-    
-    // Trigger shake animation
-    passcodeDots.classList.add('shake');
-    
-    setTimeout(() => {
-      passcodeBuffer = "";
-      updatePasscodeDots();
-      passcodeDots.classList.remove('shake');
-    }, 350);
-  }
-}
-
-/**
- * Force locks the interface
- */
-function lockVisualizer() {
-  // Close active SSE connection
-  if (eventSource) {
-    eventSource.close();
-    eventSource = null;
-  }
-
-  // Clear states
-  passcodeBuffer = "";
-  updatePasscodeDots();
-  allSentences = [];
-  renderHistoryFeed([]);
-  
-  // Update view visibility
-  viewStream.style.display = 'none';
-  viewLock.classList.add('active');
-  
-  if (window.lucide) {
-    window.lucide.createIcons();
-  }
-}
-
-/**
- * Transition from Lock Screen to Visualizer stream view
- */
-async function unlockVisualizer() {
-  viewLock.classList.remove('active');
-  viewStream.style.display = 'block';
-  
-  if (window.lucide) {
-    window.lucide.createIcons();
-  }
-
+async function initializeVisualizer() {
   // Auto-discover the best API endpoint before fetching history
   await discoverApiEndpoint();
 
@@ -179,13 +70,13 @@ async function discoverApiEndpoint() {
     const timeoutId = setTimeout(() => controller.abort(), 1200); // 1.2 seconds timeout
     
     // Quick request to local python listener
-    const response = await fetch('http://localhost:5001/activity?passcode=' + CORRECT_PASSCODE, {
+    const response = await fetch('http://localhost:5001/activity', {
       signal: controller.signal
     });
     
     clearTimeout(timeoutId);
     
-    if (response.status === 200 || response.status === 401) {
+    if (response.status === 200) {
       API_BASE_URL = 'http://localhost:5001';
       console.log("Discovered local tracker active on http://localhost:5001");
       return;
@@ -200,15 +91,14 @@ async function discoverApiEndpoint() {
 }
 
 /**
- * Fetch historical data from Python server (authenticating via passcode)
+ * Fetch historical data from Python server
  */
 async function loadHistoryFeed() {
   try {
-    const response = await fetch(`${API_BASE_URL}/activity?passcode=${CORRECT_PASSCODE}`);
+    const response = await fetch(`${API_BASE_URL}/activity`);
     
-    if (response.status === 401) {
-      lockVisualizer();
-      return;
+    if (!response.ok) {
+      throw new Error(`Server returned status ${response.status}`);
     }
     
     const records = await response.json();
@@ -229,14 +119,14 @@ async function loadHistoryFeed() {
 }
 
 /**
- * Establishes real-time connection to SSE with secure passcode query param
+ * Establishes real-time connection to SSE
  */
 function connectToSecureStream() {
   if (eventSource) {
     eventSource.close();
   }
 
-  eventSource = new EventSource(`${API_BASE_URL}/stream?passcode=${CORRECT_PASSCODE}`);
+  eventSource = new EventSource(`${API_BASE_URL}/stream`);
 
   eventSource.onopen = () => {
     updateConnectionStatus(true);
@@ -368,7 +258,7 @@ function handleSearch() {
 async function clearHistory() {
   if (confirm('Are you sure you want to delete ALL typed history? This will permanently wipe your text logs.')) {
     try {
-      const response = await fetch(`${API_BASE_URL}/clear?passcode=${CORRECT_PASSCODE}`);
+      const response = await fetch(`${API_BASE_URL}/clear`);
       const data = await response.json();
       
       if (data.status === 'cleared') {

