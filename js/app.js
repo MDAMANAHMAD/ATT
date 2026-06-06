@@ -31,10 +31,8 @@ let eventSource = null;
 let allSentences = [];
 
 // Determine API Base URL
-// If hosted on a cloud domain, connect to the cloud Render API, otherwise default to local port 5001
-const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  ? 'http://localhost:5001'
-  : 'https://att-render-api.onrender.com'; // Replace this URL with your actual hosted Render service URL
+const API_BASE_URL = 'https://att-render-api.onrender.com';
+
 
 // Initialize Application
 document.addEventListener('DOMContentLoaded', async () => {
